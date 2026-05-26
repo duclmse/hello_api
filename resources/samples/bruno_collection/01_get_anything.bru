@@ -1,0 +1,29 @@
+meta {
+  name: 01_get_anything
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/anything
+  body: none
+  auth: inherit
+}
+
+script:pre-request {
+  test("request succesfully", () => {
+    expect(res.status).to.equal(200)
+  })
+}
+
+script:post-response {
+  test("request succesfully", () => {
+    expect(res.status).to.equal(200)
+  })
+  
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

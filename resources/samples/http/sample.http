@@ -1,0 +1,69 @@
+### users/get anything
+
+GET {{base_url}}/anything
+Accept: application/json
+
+
+### users/get with auth
+### @param output /tmp/bearer_response.json
+
+GET {{base_url}}/bearer
+Authorization: Bearer {{token}}
+
+> {%
+import { pm, test, expect, results } from "sandbox:pm";
+test("status is 200", function () {
+  expect(pm.response.code).to.equal(200);
+});
+return results();
+%}
+
+
+### users/post json body
+
+POST {{base_url}}/post
+Content-Type: application/json
+Accept: application/json
+
+{
+  "id": "{{user_id}}",
+  "name": "Alice",
+  "email": "alice@example.com"
+}
+
+> {%
+import { pm, test, expect, results } from "sandbox:pm";
+test("status is 200", function () {
+  expect(pm.response.code).to.equal(200);
+});
+test("echoes request body", function () {
+  var body = pm.response.json();
+  expect(body.json.name).to.equal("Alice");
+});
+return results();
+%}
+
+
+### users/put update
+
+PUT {{base_url}}/put
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "id": "{{user_id}}",
+  "name": "Alice Updated"
+}
+
+
+### users/delete
+
+DELETE {{base_url}}/delete
+Authorization: Bearer {{token}}
+
+
+### headers/echo
+
+GET {{base_url}}/headers
+X-Custom-Header: hello
+X-Request-Id: req-001

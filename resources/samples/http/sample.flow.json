@@ -1,0 +1,43 @@
+{
+  "name": "Sample User Flow",
+  "description": "GET, POST with capture, parallel PUT + headers, then DELETE",
+  "env": {
+    "base_url": "https://httpbin.org",
+    "token": "my-secret-token",
+    "user_id": "42"
+  },
+  "nodes": [
+    {
+      "type": "step",
+      "id": "get_anything",
+      "file": "sample.http",
+      "entry": "users/get anything"
+    },
+    {
+      "type": "step",
+      "id": "post_user",
+      "file": "sample.http",
+      "entry": "users/post json body",
+      "depends_on": "get_anything",
+      "capture": {
+        "echoed_name": "res.body.json.name"
+      }
+    },
+    {
+      "type": "parallel",
+      "id": "finish",
+      "depends_on": ["post_user"],
+      "steps": [
+        { "id": "put_update",   "file": "sample.http", "entry": "users/put update" },
+        { "id": "echo_headers", "file": "sample.http", "entry": "headers/echo" }
+      ]
+    },
+    {
+      "type": "step",
+      "id": "delete_user",
+      "file": "sample.http",
+      "entry": "users/delete",
+      "depends_on": "finish"
+    }
+  ]
+}

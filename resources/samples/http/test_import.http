@@ -1,0 +1,17 @@
+### the first request
+### @param
+
+< {%
+   // common script parts can be moved to separate files and imported with 'import' keyword
+   import { makeSignature } from"./my-utils";
+
+   request.variables.set("signature", makeSignature())
+%}
+
+POST https://examples.http-client.intellij.net/post
+X-My-Signature: {{signature}}
+Content-Type: application/json
+
+{
+  "prop": "value"
+}

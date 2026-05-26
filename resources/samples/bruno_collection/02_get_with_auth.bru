@@ -1,0 +1,31 @@
+meta {
+  name: 02_get_with_auth
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/bearer
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+vars:pre-request {
+  token: bearer_token_value
+}
+
+script:pre-request {
+  test("request succesfully", () => {
+    expect(res.status).to.equal(200)
+  })
+}
+
+script:post-response {
+  test("request succesfully", () => {
+    expect(res.status).to.equal(200)
+  })
+}

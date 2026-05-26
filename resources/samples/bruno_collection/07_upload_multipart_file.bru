@@ -1,0 +1,30 @@
+meta {
+  name: 07_upload_multipart_file
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/post
+  body: multipart-form
+  auth: none
+}
+
+body:multipart-form {
+  name: @file(/Users/duclm/projects/rust/hello_client/resources/samples/_payload/upload_payload.json) @contentType(application/json)
+}
+
+script:post-response {
+  test("status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("echoes text field", function () {
+    expect(res.body.form.title).to.equal("File upload demo");
+  });
+  test("echoes uploaded file", function () {
+    var body = res.body;
+    var file = JSON.parse(body.files.payload);
+    expect(file.name).to.equal("Alice");
+  });
+}
+​

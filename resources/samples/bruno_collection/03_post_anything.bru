@@ -1,0 +1,25 @@
+meta {
+  name: 03_post_anything
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/anything
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "id": "42",
+    "name": "Alice",
+    "email": "alice@example.com"
+  }
+}
+
+script:post-response {
+  test("request succesfully", () => {
+    expect(res.status).to.equal(200)
+  })
+}

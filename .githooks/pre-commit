@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pre-commit hook: format, clippy, build check, ASCII guard for SDK JS files.
+# Activate once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# ── 1. Rust format ─────────────────────────────────────────────────────────────
+echo "[pre-commit] cargo fmt --check"
+cargo fmt --all -- --check
+
+# ── 2. ASCII guard for sdk-ts JS sources ──────────────────────────────────────
+# deno_core embeds these files as extension sources; non-ASCII bytes corrupt
+# snapshots or cause panics in V8 source processing.
+echo "[pre-commit] checking sdk-ts JS files for non-ASCII bytes"
+python3 << 'PYEOF'
+import sys, glob
+
+patterns = [
+    "crate/hello_sandbox/sdk-ts/src/*.js",
+    "crate/hello_client/sdk-ts/src/*.js",
+]
+errors = []
+for pattern in patterns:
+    for path in glob.glob(pattern):
+        with open(path, "rb") as fh:
+            for lineno, line in enumerate(fh, 1):
+                for col, byte in enumerate(line, 1):
+                    if byte > 127:
+                        errors.append(f"  {path}:{lineno}:{col}: non-ASCII byte 0x{byte:02x}")
+if errors:
+    print("ERROR: sdk-ts/src/*.js must be 7-bit ASCII only (deno_core requirement):", file=sys.stderr)
+    for msg in errors:
+        print(msg, file=sys.stderr)
+    sys.exit(1)
+PYEOF
+
+# ── 3. Rust clippy ─────────────────────────────────────────────────────────────
+echo "[pre-commit] cargo clippy"
+cargo clippy -- -D warnings
+
+# ── 4. Rust build check ────────────────────────────────────────────────────────
+echo "[pre-commit] cargo check"
+cargo check
+
+echo "[pre-commit] all checks passed"

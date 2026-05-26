@@ -1,0 +1,7 @@
+.idea/
+**/input/
+**/output/
+**/snapshot/
+**/target/
+.DS_Store
+Cargo.lock

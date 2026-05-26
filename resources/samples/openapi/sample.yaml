@@ -1,0 +1,101 @@
+# OpenAPI 3.0 sample — equivalent to sample.http
+# Import with: hello_client sample.yaml
+# Convert to .http: hello_client sample.yaml --to http -o out.http
+
+openapi: "3.0.0"
+
+info:
+  title: Sample API
+  version: "1.0.0"
+  description: A sample OpenAPI spec mirroring the hello_client sample collection.
+
+servers:
+  - url: https://httpbin.org
+
+paths:
+  /anything:
+    get:
+      operationId: getAnything
+      summary: get anything
+      responses:
+        "200":
+          description: Returns the full request data as JSON.
+
+  /bearer:
+    get:
+      operationId: getWithAuth
+      summary: get with auth
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          schema:
+            type: string
+            example: "Bearer my-secret-token"
+      responses:
+        "200":
+          description: OK if the bearer token is present.
+        "401":
+          description: Unauthorized.
+
+  /post:
+    post:
+      operationId: postJsonBody
+      summary: post json body
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                id: 42
+                name: Alice
+                email: alice@example.com
+      responses:
+        "200":
+          description: Echoes the request body under `.json`.
+
+  /put:
+    put:
+      operationId: putUpdate
+      summary: put update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                id: 42
+                name: Alice Updated
+      responses:
+        "200":
+          description: Echoes the request body under `.json`.
+
+  /delete:
+    delete:
+      operationId: deleteResource
+      summary: delete
+      responses:
+        "200":
+          description: Echoes request metadata.
+
+  /headers:
+    get:
+      operationId: echoHeaders
+      summary: echo headers
+      parameters:
+        - name: X-Custom-Header
+          in: header
+          schema:
+            type: string
+            example: hello
+        - name: X-Request-Id
+          in: header
+          schema:
+            type: string
+            example: req-001
+      responses:
+        "200":
+          description: Returns all received headers under `.headers`.

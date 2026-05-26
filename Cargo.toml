@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crate/hello_client",
+    "crate/hello_core",
+    "crate/hello_sandbox",
+    "crate/hello_server",
+    "crate/hello_tui",
+]
+
+[workspace.dependencies]
+log = { version = "0.4" }
+nom = { version = "8.0.0" }
+jemallocator = { version = "0.5.4" }
+mlua = { version = "0.11.1", features = ["async", "luau", "vendored"] }
+mlua_derive = "0.11.0"
+reqwest = { version = "0.12.24", features = [
+    "json",
+    "gzip",
+    "stream",
+    "blocking",
+    "rustls-tls",
+] }
+futures = "0.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+base64 = "0.22"
+hmac = "0.12"
+md-5 = "0.10"
+percent-encoding = "2"
+rand = "0.8"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.31" }
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+axum = { version = "0.8", features = ["macros"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = [
+    "trace",
+    "cors",
+    "timeout",
+    "compression-gzip",
+] }
+http = "1"
+matchit = "0.8"
+arc-swap = "1"
+notify = "6"
+
+[profile.release]
+opt-level = 3
+strip = true

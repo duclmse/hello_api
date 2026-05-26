@@ -1,0 +1,28 @@
+info:
+  name: 02_get_with_auth
+  type: http
+  seq: 2
+
+http:
+  method: get
+  url: "{{base_url}}/anything"
+  auth:
+    type: bearer
+    token: "{{token}}"
+
+runtime:
+  variables:
+    - name: token
+      value: my-secret-token
+  scripts:
+    - type: after-response
+      code: |-
+        test("request successfully", () => {
+          expect(res.status).to.equal(200)
+        })
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

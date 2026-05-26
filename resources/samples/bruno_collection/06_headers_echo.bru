@@ -1,0 +1,16 @@
+meta {
+  name: 06_headers_echo
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/headers
+  body: none
+  auth: none
+}
+
+headers {
+  X-Custom-Header: hello
+  X-Request-Id: req-001
+}

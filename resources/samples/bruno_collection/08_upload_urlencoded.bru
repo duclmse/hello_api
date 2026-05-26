@@ -1,0 +1,32 @@
+meta {
+  name: 08_upload_url-encoded
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/post
+  body: formUrlEncoded
+  auth: none
+}
+
+body:form-urlencoded {
+  username: {{user_id}}
+  name: Alice
+  role: admin
+}
+
+vars:pre-request {
+  user_id: user123
+}
+
+script:post-response {
+  test("status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("echoes form fields", function () {
+    var body = res.body;
+    expect(body.form.name).to.equal("Alice");
+    expect(body.form.role).to.equal("admin");
+  });
+}

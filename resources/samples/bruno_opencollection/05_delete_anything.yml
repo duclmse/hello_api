@@ -1,0 +1,28 @@
+info:
+  name: 05_delete
+  type: http
+  seq: 5
+
+http:
+  method: DELETE
+  url: "{{base_url}}/delete"
+  auth:
+    type: bearer
+    token: "{{token}}"
+
+runtime:
+  variables:
+    - name: token
+      value: my-secret-token
+  scripts:
+    - type: after-response
+      code: |-
+        test("request successfully", () => {
+          expect(res.status).to.equal(200)
+        })
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

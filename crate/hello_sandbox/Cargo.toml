@@ -1,0 +1,64 @@
+[package]
+name = "hello_sandbox"
+version = "0.2.0"
+edition = "2021"
+autoexamples = false
+
+[dependencies]
+deno_core          = "0.401"
+deno_ast           = { version = "0.53", features = ["transpiling"] }
+deno_error         = "0.7"
+tokio              = { version = "1", features = ["full"] }
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+anyhow             = "1"
+thiserror          = "1"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2               = "0.10"
+rand               = "0.8"
+uuid               = { version = "1", features = ["v4"] }
+reqwest            = { version = "0.12", features = ["json"] }
+base64             = "0.22"
+rusqlite           = { version = "0.31", features = ["bundled"] }
+
+# For process-level isolation (IsolationLevel::Untrusted)
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = "0.3"
+libc = "0.2"
+
+[dev-dependencies]
+mockito  = "1"
+tempfile = "3"
+
+[[bin]]
+name = "sandbox-worker"
+path = "src/bin/worker.rs"
+
+[[bin]]
+name = "make-snapshot"
+path = "src/bin/make_snapshot.rs"
+
+[[example]]
+name = "skeleton"
+path = "examples/skeleton.rs"
+
+[[example]]
+name = "loader"
+path = "examples/loader_demo.rs"
+
+[[example]]
+name = "core"
+path = "examples/core_demo.rs"
+
+[[example]]
+name = "runtime"
+path = "examples/runtime_demo.rs"
+
+[[example]]
+name = "sdk"
+path = "examples/sdk_demo.rs"
+
+[[example]]
+name = "demo"
+path = "examples/demo.rs"

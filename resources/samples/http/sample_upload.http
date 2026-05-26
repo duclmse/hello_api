@@ -1,0 +1,48 @@
+### upload/send file as raw body
+
+POST {{base_url}}/post
+Content-Type: application/json
+
+< ./upload_payload.json
+
+
+### upload/url-encoded form
+
+POST {{base_url}}/post
+Content-Type: application/x-www-form-urlencoded
+
+username={{user_id}}&name=Alice&role=admin
+
+
+### upload/multipart text fields
+
+POST {{base_url}}/post
+Content-Type: multipart/form-data; boundary=----FormBoundary
+
+------FormBoundary
+Content-Disposition: form-data; name="title"
+
+Sample Upload
+------FormBoundary
+Content-Disposition: form-data; name="description"
+
+A multipart form submission with text fields only.
+------FormBoundary--
+
+
+### upload/multipart with file part
+### @param output /tmp/upload_response.json
+
+POST {{base_url}}/post
+Content-Type: multipart/form-data; boundary=----FileBoundary
+
+------FileBoundary
+Content-Disposition: form-data; name="title"
+
+File upload demo
+------FileBoundary
+Content-Disposition: form-data; name="payload"; filename="upload_payload.json"
+Content-Type: application/json
+
+< ./upload_payload.json
+------FileBoundary--

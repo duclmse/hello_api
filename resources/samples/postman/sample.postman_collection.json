@@ -1,0 +1,144 @@
+{
+  "info": {
+    "name": "sample",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://httpbin.org" },
+    { "key": "token", "value": "my-secret-token" },
+    { "key": "user_id", "value": "42" }
+  ],
+  "item": [
+    {
+      "name": "users",
+      "item": [
+        {
+          "name": "get anything",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/anything",
+              "host": ["{{base_url}}"],
+              "path": ["anything"]
+            }
+          }
+        },
+        {
+          "name": "get with auth",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/bearer",
+              "host": ["{{base_url}}"],
+              "path": ["bearer"]
+            }
+          }
+        },
+        {
+          "name": "post json body",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('echoes request body', function () {",
+                  "  var body = pm.response.json();",
+                  "  pm.expect(body.json.name).to.equal('Alice');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{user_id}},\n  \"name\": \"Alice\",\n  \"email\": \"alice@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/post",
+              "host": ["{{base_url}}"],
+              "path": ["post"]
+            }
+          }
+        },
+        {
+          "name": "put update",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{user_id}},\n  \"name\": \"Alice Updated\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/put",
+              "host": ["{{base_url}}"],
+              "path": ["put"]
+            }
+          }
+        },
+        {
+          "name": "delete",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{base_url}}/delete",
+              "host": ["{{base_url}}"],
+              "path": ["delete"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "headers",
+      "item": [
+        {
+          "name": "echo",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Custom-Header", "value": "hello" },
+              { "key": "X-Request-Id", "value": "req-001" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/headers",
+              "host": ["{{base_url}}"],
+              "path": ["headers"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

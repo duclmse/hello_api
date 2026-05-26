@@ -1,0 +1,15 @@
+meta {
+  name: 05_delete
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{base_url}}/delete
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

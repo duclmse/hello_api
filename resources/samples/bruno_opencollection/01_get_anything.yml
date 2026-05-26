@@ -1,0 +1,39 @@
+info:
+  name: 01_get_anything
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{base_url}}/anything"
+  auth: inherit
+
+runtime:
+  variables:
+    - name: base_url
+      value: https://httpbin.org
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+  actions:
+    - type: set-variable
+      phase: after-response
+      selector:
+        expression: "1"
+        method: jsonq
+      variable:
+        name: post_res_var
+        scope: runtime
+  scripts:
+    - type: after-response
+      code: |-
+        test("request successfully", () => {
+          expect(res.status).to.equal(200)
+        })
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
