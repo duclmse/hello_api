@@ -15,8 +15,8 @@ use nom::{
 use std::{collections::HashMap, str};
 
 use crate::http_request::{
-    Body, HttpRequest, MultipartPart, PartContent, RequestEntry, RequestLine, Script, Url,
-    UrlSegment,
+    Body, FormField, FormFieldValue, HttpRequest, MultipartPart, PartContent, RequestEntry,
+    RequestLine, Script, Url, UrlSegment,
 };
 use crate::metadata::metadata;
 
@@ -170,7 +170,16 @@ pub fn request_line(input: &'_ str) -> IResult<&'_ str, RequestLine<'_>> {
 }
 
 // Parse a single header — key never crosses a line boundary.
+// Fails immediately on a blank line so that `many0(header)` stops at the
+// headers/body separator and does not consume body content as spurious headers.
 fn header(input: &str) -> IResult<&str, Option<(&str, &str)>> {
+    // Blank line → not a header; caller's opt(line_ending) will consume it.
+    if input.starts_with('\n') || input.starts_with("\r\n") || input.starts_with('\r') {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        )));
+    }
     let (input, header) = terminated(
         opt(pair(
             terminated(take_while1(|c: char| c != ':' && c != '\n' && c != '\r'), tag(": ")),
@@ -252,7 +261,8 @@ fn body(input: &str) -> IResult<&str, Option<String>> {
 pub fn http_request(input: &'_ str) -> IResult<&'_ str, HttpRequest<'_>> {
     let (input, (request_line, headers, raw_body)) = (request_line, headers, body).parse(input)?;
 
-    let body = raw_body.map(interpret_body);
+    let parsed_body = raw_body.map(interpret_body);
+    let body = coerce_body_by_content_type(&headers, parsed_body);
 
     Ok((
         input,
@@ -278,6 +288,14 @@ fn interpret_body(raw: String) -> Body {
         && let Some(mp) = parse_multipart_body(trimmed)
     {
         return mp;
+    }
+    // `[form]` block → multipart/form-data shorthand
+    if trimmed.starts_with("[form]") {
+        return parse_form_block(trimmed);
+    }
+    // `[form-urlencoded]` block → application/x-www-form-urlencoded shorthand
+    if trimmed.starts_with("[form-urlencoded]") {
+        return parse_form_urlencoded_block(trimmed);
     }
     Body::Raw(raw)
 }
@@ -354,6 +372,270 @@ fn parse_multipart_body(raw: &str) -> Option<Body> {
         None
     } else {
         Some(Body::Multipart { boundary, parts })
+    }
+}
+
+/// Split `value[; attr1=v1[; attr2=v2]]` into `(value, attrs)`.
+///
+/// The first `; ` (semicolon-space) marks the boundary between the value and its
+/// attributes. Attribute values may be quoted with `"`.
+fn split_value_and_attrs(s: &str) -> (String, Vec<(String, String)>) {
+    let Some(semi) = s.find("; ") else {
+        return (s.to_string(), vec![]);
+    };
+    let value = s[..semi].to_string();
+    let attrs = s[semi + 2..]
+        .split("; ")
+        .filter_map(|part| {
+            let eq = part.find('=')?;
+            let key = part[..eq].trim().to_string();
+            let val = part[eq + 1..].trim().trim_matches('"').to_string();
+            if key.is_empty() { None } else { Some((key, val)) }
+        })
+        .collect();
+    (value, attrs)
+}
+
+/// Parse `key = value[; attr=v]*` lines into [`FormField`] entries.
+/// Blank lines and lines starting with `#` are skipped.
+fn parse_form_field_lines(text: &str) -> Vec<FormField> {
+    let mut fields: Vec<FormField> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r').trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(eq) = line.find(" = ") {
+            let name = line[..eq].trim().to_string();
+            let rest = line[eq + 3..].trim();
+            let (val_str, attrs) = split_value_and_attrs(rest);
+            let value = if let Some(path) = val_str.strip_prefix("< ") {
+                FormFieldValue::File(path.trim().to_string())
+            } else {
+                FormFieldValue::Text(val_str)
+            };
+            if !name.is_empty() {
+                fields.push(FormField { name, value, attrs });
+            }
+        }
+    }
+    fields
+}
+
+/// Parse `key = value` lines into `(name, value)` tuples for `FormUrlEncoded`.
+fn parse_urlencoded_field_lines(text: &str) -> Vec<(String, String)> {
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r').trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(eq) = line.find(" = ") {
+            let name = line[..eq].trim().to_string();
+            let value = line[eq + 3..].trim().to_string();
+            if !name.is_empty() {
+                fields.push((name, value));
+            }
+        }
+    }
+    fields
+}
+
+/// Parse a `[form]` shorthand body into `Body::Form`.
+fn parse_form_block(raw: &str) -> Body {
+    let text = raw.lines().skip(1).collect::<Vec<_>>().join("\n");
+    Body::Form { fields: parse_form_field_lines(&text) }
+}
+
+/// Parse a `[form-urlencoded]` shorthand body into `Body::FormUrlEncoded`.
+fn parse_form_urlencoded_block(raw: &str) -> Body {
+    let text = raw.lines().skip(1).collect::<Vec<_>>().join("\n");
+    Body::FormUrlEncoded { fields: parse_urlencoded_field_lines(&text) }
+}
+
+/// Returns true when `text` contains at least one `key = value` form field line.
+fn looks_like_form_fields(text: &str) -> bool {
+    text.lines().any(|line| {
+        let t = line.trim();
+        !t.is_empty() && !t.starts_with('#') && t.contains(" = ")
+    })
+}
+
+/// Returns true when `text` looks like YAML-style multipart fields using colon
+/// separators (`key: value` or `key:` array headers).
+///
+/// Distinguished from JSON/XML bodies and from `key = value` form fields.
+fn looks_like_yaml_multipart(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') || trimmed.starts_with('<') {
+        return false;
+    }
+    trimmed.lines().any(|line| {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') || t.starts_with('-') {
+            return false;
+        }
+        if let Some(pos) = t.find(':') {
+            let key = &t[..pos];
+            !key.is_empty()
+                && key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '[' || c == ']')
+        } else {
+            false
+        }
+    })
+}
+
+/// Parse a YAML-style multipart body into [`FormField`] entries.
+///
+/// Two patterns are supported:
+/// - `key: value` — simple text or `< file` field.
+/// - `key:` followed by indented list items (`    - prop: val …`) — produces one
+///   `FormField` per list item; the `file` sub-property (or first sub-property)
+///   becomes the field value and remaining sub-properties become attrs.
+fn parse_yaml_multipart_body(text: &str) -> Vec<FormField> {
+    let mut fields: Vec<FormField> = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        i += 1;
+
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('-') {
+            continue;
+        }
+
+        let indent = line.len() - line.trim_start().len();
+
+        // Bare array-field header: `name:` with no value after the colon.
+        if !trimmed.contains(": ") && trimmed.ends_with(':') {
+            let name = trimmed[..trimmed.len() - 1].trim().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            // Collect list items indented deeper than this header line.
+            while i < lines.len() {
+                let item_line = lines[i];
+                let item_trimmed = item_line.trim();
+                let item_indent = item_line.len() - item_line.trim_start().len();
+                if item_indent <= indent || !item_trimmed.starts_with("- ") {
+                    break;
+                }
+                i += 1;
+
+                // Parse the first sub-property from the `- key: value` line.
+                let first_str = item_trimmed.strip_prefix("- ").unwrap_or("").trim();
+                let mut sub_props: Vec<(String, String)> = Vec::new();
+                if let Some(c) = first_str.find(": ") {
+                    sub_props.push((
+                        first_str[..c].trim().to_string(),
+                        first_str[c + 2..].trim().to_string(),
+                    ));
+                } else if !first_str.contains(": ") && first_str.ends_with(':') {
+                    sub_props.push((
+                        first_str[..first_str.len() - 1].trim().to_string(),
+                        String::new(),
+                    ));
+                }
+
+                // Parse continuation sub-properties aligned past the `- `.
+                while i < lines.len() {
+                    let sub_line = lines[i];
+                    let sub_trimmed = sub_line.trim();
+                    let sub_indent = sub_line.len() - sub_line.trim_start().len();
+                    if sub_trimmed.is_empty()
+                        || sub_trimmed.starts_with("- ")
+                        || sub_indent <= item_indent
+                    {
+                        break;
+                    }
+                    i += 1;
+                    if let Some(c) = sub_trimmed.find(": ") {
+                        sub_props.push((
+                            sub_trimmed[..c].trim().to_string(),
+                            sub_trimmed[c + 2..].trim().to_string(),
+                        ));
+                    }
+                }
+
+                // The `file` sub-property (or the first sub-property) becomes the value;
+                // all remaining sub-properties become attrs.
+                let value_key = sub_props
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("file"))
+                    .map(|(k, _)| k.clone())
+                    .or_else(|| sub_props.first().map(|(k, _)| k.clone()));
+
+                if let Some(ref vk) = value_key {
+                    let val_str = sub_props
+                        .iter()
+                        .find(|(k, _)| k == vk)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_default();
+                    let form_value = if let Some(path) = val_str.strip_prefix("< ") {
+                        FormFieldValue::File(path.trim().to_string())
+                    } else {
+                        FormFieldValue::Text(val_str)
+                    };
+                    let attrs: Vec<(String, String)> =
+                        sub_props.into_iter().filter(|(k, _)| k != vk).collect();
+                    fields.push(FormField { name: name.clone(), value: form_value, attrs });
+                }
+            }
+        } else if let Some(colon) = trimmed.find(": ") {
+            // Simple `key: value` field.
+            let name = trimmed[..colon].trim().to_string();
+            let value_str = trimmed[colon + 2..].trim();
+            let value = if let Some(path) = value_str.strip_prefix("< ") {
+                FormFieldValue::File(path.trim().to_string())
+            } else {
+                FormFieldValue::Text(value_str.to_string())
+            };
+            fields.push(FormField { name, value, attrs: vec![] });
+        }
+    }
+
+    fields
+}
+
+/// When `Content-Type: multipart/form-data` (no boundary) or
+/// `Content-Type: application/x-www-form-urlencoded` (or the shorthand
+/// `form-urlencoded`) is present and the body looks like field lines,
+/// coerce `Body::Raw` to the appropriate shorthand variant.
+fn coerce_body_by_content_type(headers: &HashMap<&str, &str>, body: Option<Body>) -> Option<Body> {
+    let ct = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .map(|(_, v)| v.to_ascii_lowercase());
+    let Some(ct) = ct else { return body; };
+
+    match body {
+        Some(Body::Raw(raw)) => {
+            let trimmed = raw.trim();
+            if ct.starts_with("multipart/form-data") && !ct.contains("boundary=") {
+                if looks_like_form_fields(trimmed) {
+                    Some(Body::Form { fields: parse_form_field_lines(trimmed) })
+                } else if looks_like_yaml_multipart(trimmed) {
+                    Some(Body::Form { fields: parse_yaml_multipart_body(trimmed) })
+                } else {
+                    Some(Body::Raw(raw))
+                }
+            } else if ct.starts_with("application/x-www-form-urlencoded")
+                || ct == "form-urlencoded"
+            {
+                if looks_like_form_fields(trimmed) {
+                    Some(Body::FormUrlEncoded { fields: parse_urlencoded_field_lines(trimmed) })
+                } else {
+                    Some(Body::Raw(raw))
+                }
+            } else {
+                Some(Body::Raw(raw))
+            }
+        },
+        other => other,
     }
 }
 
@@ -924,6 +1206,341 @@ hello\r\n\
             matches!(&entries[0].request.body, Some(Body::Multipart { boundary, .. }) if boundary == "MyBound"),
             "got {:?}",
             entries[0].request.body
+        );
+    }
+
+    // ── [form] shorthand ──────────────────────────────────────────────────────
+
+    #[test]
+    fn form_block_parses_text_fields() {
+        let raw = "[form]\ntitle = Sample Upload\ndescription = A test\n";
+        let body = interpret_body(raw.to_string());
+        let Body::Form { fields } = body else {
+            panic!("expected Body::Form, got {:?}", body);
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "title");
+        assert_eq!(fields[0].value, FormFieldValue::Text("Sample Upload".to_string()));
+        assert_eq!(fields[1].name, "description");
+        assert_eq!(fields[1].value, FormFieldValue::Text("A test".to_string()));
+    }
+
+    #[test]
+    fn form_block_parses_file_field() {
+        let raw = "[form]\nfile = < ./photo.jpg\ncaption = hello\n";
+        let body = interpret_body(raw.to_string());
+        let Body::Form { fields } = body else {
+            panic!("expected Body::Form");
+        };
+        assert_eq!(fields[0].name, "file");
+        assert_eq!(fields[0].value, FormFieldValue::File("./photo.jpg".to_string()));
+        assert_eq!(fields[1].value, FormFieldValue::Text("hello".to_string()));
+    }
+
+    #[test]
+    fn form_block_duplicate_field_names_produce_multiple_parts() {
+        // Repeating a field name (e.g. files[]) must produce one FormField per
+        // line — the Vec must NOT deduplicate.
+        let raw = "[form]\nfiles[] = < ./a.txt; filename=a.txt\nfiles[] = < ./b.txt; filename=b.txt\n";
+        let body = interpret_body(raw.to_string());
+        let Body::Form { fields } = body else {
+            panic!("expected Body::Form, got {:?}", body);
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "files[]");
+        assert_eq!(fields[0].value, FormFieldValue::File("./a.txt".to_string()));
+        assert_eq!(fields[0].attrs, vec![("filename".to_string(), "a.txt".to_string())]);
+        assert_eq!(fields[1].name, "files[]");
+        assert_eq!(fields[1].value, FormFieldValue::File("./b.txt".to_string()));
+        assert_eq!(fields[1].attrs, vec![("filename".to_string(), "b.txt".to_string())]);
+    }
+
+    #[test]
+    fn form_block_skips_blank_and_comment_lines() {
+        let raw = "[form]\n# a comment\n\nname = Alice\n\n# another\nrole = admin\n";
+        let body = interpret_body(raw.to_string());
+        let Body::Form { fields } = body else {
+            panic!("expected Body::Form");
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "name");
+        assert_eq!(fields[1].name, "role");
+    }
+
+    #[test]
+    fn form_block_empty_fields_list() {
+        let raw = "[form]\n# just a comment\n";
+        let body = interpret_body(raw.to_string());
+        assert!(matches!(body, Body::Form { fields } if fields.is_empty()));
+    }
+
+    #[test]
+    fn full_request_with_form_block() {
+        let input =
+            "POST https://example.com/upload HTTP/1.1\n\n[form]\ntitle = Hello\nfile = < ./f.txt\n";
+        let (_, entries) = request_collection(input).unwrap();
+        let body = &entries[0].request.body;
+        assert!(
+            matches!(body, Some(Body::Form { fields }) if fields.len() == 2),
+            "got {:?}", body
+        );
+    }
+
+    // ── [form] field attributes ───────────────────────────────────────────────
+
+    #[test]
+    fn form_block_field_with_filename_attr() {
+        let raw = "[form]\nfile = < ./photo.jpg; filename=photo.jpg\n";
+        let Body::Form { fields } = interpret_body(raw.to_string()) else {
+            panic!("expected Body::Form");
+        };
+        assert_eq!(fields[0].name, "file");
+        assert_eq!(fields[0].value, FormFieldValue::File("./photo.jpg".to_string()));
+        assert_eq!(fields[0].attrs, vec![("filename".to_string(), "photo.jpg".to_string())]);
+    }
+
+    #[test]
+    fn form_block_field_with_multiple_attrs() {
+        let raw = "[form]\nfile = < ./img.png; filename=img.png; Content-Type=image/png\n";
+        let Body::Form { fields } = interpret_body(raw.to_string()) else {
+            panic!("expected Body::Form");
+        };
+        assert_eq!(fields[0].attrs.len(), 2);
+        assert_eq!(fields[0].attrs[0], ("filename".to_string(), "img.png".to_string()));
+        assert_eq!(fields[0].attrs[1], ("Content-Type".to_string(), "image/png".to_string()));
+    }
+
+    #[test]
+    fn form_block_text_field_with_content_type_attr() {
+        let raw = "[form]\ndata = {\"k\":1}; Content-Type=application/json\n";
+        let Body::Form { fields } = interpret_body(raw.to_string()) else {
+            panic!("expected Body::Form");
+        };
+        assert_eq!(fields[0].value, FormFieldValue::Text("{\"k\":1}".to_string()));
+        assert_eq!(fields[0].attrs, vec![("Content-Type".to_string(), "application/json".to_string())]);
+    }
+
+    #[test]
+    fn form_block_field_no_attrs_has_empty_attrs_vec() {
+        let raw = "[form]\ntitle = Hello\n";
+        let Body::Form { fields } = interpret_body(raw.to_string()) else {
+            panic!("expected Body::Form");
+        };
+        assert!(fields[0].attrs.is_empty());
+    }
+
+    // ── header-based detection ────────────────────────────────────────────────
+
+    #[test]
+    fn content_type_multipart_without_boundary_coerces_body_to_form() {
+        let input = concat!(
+            "POST https://example.com/upload HTTP/1.1\n",
+            "Content-Type: multipart/form-data\n",
+            "\n",
+            "title = Sample Upload\n",
+            "description = A test\n",
+        );
+        let (_, entries) = request_collection(input).unwrap();
+        assert!(
+            matches!(&entries[0].request.body, Some(Body::Form { fields }) if fields.len() == 2),
+            "got {:?}", entries[0].request.body
+        );
+    }
+
+    #[test]
+    fn content_type_urlencoded_coerces_body_to_form_urlencoded() {
+        let input = concat!(
+            "POST https://example.com/login HTTP/1.1\n",
+            "Content-Type: application/x-www-form-urlencoded\n",
+            "\n",
+            "username = alice\n",
+            "password = s3cr3t\n",
+        );
+        let (_, entries) = request_collection(input).unwrap();
+        assert!(
+            matches!(&entries[0].request.body,
+                Some(Body::FormUrlEncoded { fields }) if fields.len() == 2),
+            "got {:?}", entries[0].request.body
+        );
+    }
+
+    #[test]
+    fn content_type_multipart_with_boundary_does_not_coerce() {
+        // When a boundary is already set, keep raw body.
+        let input = concat!(
+            "POST https://example.com/upload HTTP/1.1\n",
+            "Content-Type: multipart/form-data; boundary=MyBound\n",
+            "\n",
+            "title = not form fields\n",
+        );
+        let (_, entries) = request_collection(input).unwrap();
+        assert!(
+            matches!(&entries[0].request.body, Some(Body::Raw(_))),
+            "got {:?}", entries[0].request.body
+        );
+    }
+
+    #[test]
+    fn body_without_form_fields_not_coerced() {
+        // A plain-text body (no " = " pattern) must not be coerced to Body::Form
+        // even when Content-Type: multipart/form-data is present.
+        // Note: avoid "key: value" shaped lines — those are consumed as headers.
+        let input = concat!(
+            "POST https://example.com/ HTTP/1.1\n",
+            "Content-Type: multipart/form-data\n",
+            "\n",
+            "just some raw text with no equals sign\n",
+        );
+        let (_, entries) = request_collection(input).unwrap();
+        assert!(
+            matches!(&entries[0].request.body, Some(Body::Raw(_))),
+            "got {:?}", entries[0].request.body
+        );
+    }
+
+    // ── YAML-style multipart body ─────────────────────────────────────────────
+
+    #[test]
+    fn yaml_multipart_simple_text_field() {
+        let raw = "label: batch upload\ncaption: hello world\n";
+        let fields = parse_yaml_multipart_body(raw);
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "label");
+        assert_eq!(fields[0].value, FormFieldValue::Text("batch upload".to_string()));
+        assert_eq!(fields[1].name, "caption");
+        assert_eq!(fields[1].value, FormFieldValue::Text("hello world".to_string()));
+    }
+
+    #[test]
+    fn yaml_multipart_simple_file_field() {
+        let raw = "upload: < ./data.json\n";
+        let fields = parse_yaml_multipart_body(raw);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "upload");
+        assert_eq!(fields[0].value, FormFieldValue::File("./data.json".to_string()));
+    }
+
+    #[test]
+    fn yaml_multipart_array_file_fields_with_attrs() {
+        let raw = concat!(
+            "files:\n",
+            "    - file: < ./file1.txt\n",
+            "      filename: file1.txt\n",
+            "      Content-Type: text/plain\n",
+            "    - file: < ./file2.txt\n",
+            "      filename: file2.txt\n",
+            "      Content-Type: text/plain\n",
+        );
+        let fields = parse_yaml_multipart_body(raw);
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "files");
+        assert_eq!(fields[0].value, FormFieldValue::File("./file1.txt".to_string()));
+        assert_eq!(
+            fields[0].attrs,
+            vec![
+                ("filename".to_string(), "file1.txt".to_string()),
+                ("Content-Type".to_string(), "text/plain".to_string()),
+            ]
+        );
+        assert_eq!(fields[1].value, FormFieldValue::File("./file2.txt".to_string()));
+    }
+
+    #[test]
+    fn yaml_multipart_mixed_simple_and_array_fields() {
+        let raw = concat!(
+            "label: batch upload\n",
+            "files:\n",
+            "    - file: < ./a.txt\n",
+            "      filename: a.txt\n",
+            "      Content-Type: text/plain\n",
+        );
+        let fields = parse_yaml_multipart_body(raw);
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "label");
+        assert_eq!(fields[0].value, FormFieldValue::Text("batch upload".to_string()));
+        assert_eq!(fields[1].name, "files");
+        assert_eq!(fields[1].value, FormFieldValue::File("./a.txt".to_string()));
+    }
+
+    #[test]
+    fn content_type_multipart_without_boundary_coerces_yaml_body_to_form() {
+        let input = concat!(
+            "POST https://example.com/upload HTTP/1.1\n",
+            "Content-Type: multipart/form-data\n",
+            "\n",
+            "label: batch upload\n",
+            "files:\n",
+            "    - file: < ./file1.txt\n",
+            "      filename: file1.txt\n",
+            "      Content-Type: text/plain\n",
+            "    - file: < ./file2.txt\n",
+            "      filename: file2.txt\n",
+            "      Content-Type: text/plain\n",
+        );
+        let (_, entries) = request_collection(input).unwrap();
+        let body = &entries[0].request.body;
+        let Some(Body::Form { fields }) = body else {
+            panic!("expected Body::Form, got {:?}", body);
+        };
+        assert_eq!(fields.len(), 3, "label + 2 file parts");
+        assert_eq!(fields[0].name, "label");
+        assert_eq!(fields[1].name, "files");
+        assert_eq!(fields[1].value, FormFieldValue::File("./file1.txt".to_string()));
+        assert_eq!(fields[2].value, FormFieldValue::File("./file2.txt".to_string()));
+    }
+
+    // ── form-urlencoded shorthand Content-Type ────────────────────────────────
+
+    #[test]
+    fn content_type_form_urlencoded_shorthand_coerces_to_form_urlencoded() {
+        let input = concat!(
+            "POST https://example.com/post HTTP/1.1\n",
+            "Content-Type: form-urlencoded\n",
+            "\n",
+            "username = alice\n",
+            "name = Alice\n",
+            "role = admin\n",
+        );
+        let (_, entries) = request_collection(input).unwrap();
+        let body = &entries[0].request.body;
+        assert!(
+            matches!(body, Some(Body::FormUrlEncoded { fields }) if fields.len() == 3),
+            "got {:?}", body
+        );
+    }
+
+    // ── [form-urlencoded] shorthand ───────────────────────────────────────────
+
+    #[test]
+    fn form_urlencoded_block_parses_fields() {
+        let raw = "[form-urlencoded]\nusername = alice\npassword = s3cr3t\n";
+        let body = interpret_body(raw.to_string());
+        let Body::FormUrlEncoded { fields } = body else {
+            panic!("expected Body::FormUrlEncoded, got {:?}", body);
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0], ("username".to_string(), "alice".to_string()));
+        assert_eq!(fields[1], ("password".to_string(), "s3cr3t".to_string()));
+    }
+
+    #[test]
+    fn form_urlencoded_block_skips_blank_and_comment_lines() {
+        let raw = "[form-urlencoded]\n# login\n\nuser = bob\n\npass = x\n";
+        let body = interpret_body(raw.to_string());
+        let Body::FormUrlEncoded { fields } = body else {
+            panic!("expected Body::FormUrlEncoded");
+        };
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn full_request_with_form_urlencoded_block() {
+        let input =
+            "POST https://example.com/login HTTP/1.1\n\n[form-urlencoded]\nuser = alice\n";
+        let (_, entries) = request_collection(input).unwrap();
+        assert!(
+            matches!(&entries[0].request.body, Some(Body::FormUrlEncoded { fields }) if fields.len() == 1),
+            "got {:?}", entries[0].request.body
         );
     }
 }

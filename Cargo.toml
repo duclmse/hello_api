@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "crate/hello_client",
+    "crate/hello_client_tui",
     "crate/hello_core",
     "crate/hello_sandbox",
     "crate/hello_server",
-    "crate/hello_tui",
 ]
 
 [workspace.dependencies]

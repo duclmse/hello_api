@@ -6,15 +6,16 @@ pre/post scripts powered by a sandboxed V8 engine.
 
 ## Workspace
 
-| Crate            | Role                                                                      |
-| ---------------- | ------------------------------------------------------------------------- |
-| `hello_sandbox`  | V8/deno_core JavaScript sandbox — isolated execution with SDK packs       |
-| `hello_core`     | Shared parsers and adapters (.http, Bruno, OpenAPI, Postman, curl)        |
-| `hello_client`   | HTTP test runner, flow engine, CLI — depends on `hello_core` + `hello_sandbox` |
-| `hello_server`   | Local HTTP mock server — depends on `hello_core` only                     |
-| `hello_tui`      | Terminal UI                                                               |
+| Crate           | Role                                                                           |
+| --------------- | ------------------------------------------------------------------------------ |
+| `hello_sandbox` | V8/deno_core JavaScript sandbox — isolated execution with SDK packs            |
+| `hello_core`    | Shared parsers and adapters (.http, Bruno, OpenAPI, Postman, curl)             |
+| `hello_client`  | HTTP test runner, flow engine, CLI — depends on `hello_core` + `hello_sandbox` |
+| `hello_server`  | Local HTTP mock server — depends on `hello_core` only                          |
+| `hello_tui`     | Terminal UI                                                                    |
 
-Dependency order: `hello_sandbox` ← `hello_core` ← `hello_client` / `hello_server`.
+Dependency order: `hello_sandbox` ← `hello_core` ← `hello_client` /
+`hello_server`.
 
 ## Quick Start
 
@@ -78,21 +79,21 @@ Post-response scripts use the `sandbox:pm` Postman-compatible API:
 import { pm, test, expect, results } from "sandbox:pm";
 
 test("status is 200", () => expect(pm.response.code).to.equal(200));
-test("body has id",   () => expect(pm.response.json().id).to.be.a("number"));
+test("body has id", () => expect(pm.response.json().id).to.be.a("number"));
 
 return results();
 ```
 
 ## Supported Formats
 
-| Format          | Import | Export |
-| --------------- | :----: | :----: |
-| `.http` / REST  | ✓      | ✓      |
-| Postman v2.0/v2.1 | ✓    | ✓      |
-| Bruno (`.bru`)  | ✓      | ✓      |
-| OpenAPI 2/3 (YAML/JSON) | ✓ | ✓  |
-| OpenCollection  | ✓      | ✓      |
-| curl commands   | ✓      | ✓      |
+| Format                  | Import | Export |
+| ----------------------- | :----: | :----: |
+| `.http` / REST          |   ✓    |   ✓    |
+| Postman v2.0/v2.1       |   ✓    |   ✓    |
+| Bruno (`.bru`)          |   ✓    |   ✓    |
+| OpenAPI 2/3 (YAML/JSON) |   ✓    |   ✓    |
+| OpenCollection          |   ✓    |   ✓    |
+| curl commands           |   ✓    |   ✓    |
 
 ```bash
 # Auto-detected from file extension and content
@@ -130,16 +131,16 @@ Subcommands:
 
 Resolved at interpolation time without any configuration:
 
-| Placeholder              | Produces                            |
-| ------------------------ | ----------------------------------- |
-| `{{$guid}}`              | Random UUID v4                      |
-| `{{$timestamp}}`         | Unix seconds                        |
-| `{{$isoTimestamp}}`      | ISO 8601 UTC string                 |
-| `{{$randomInt}}`         | Random integer 0–1000               |
-| `{{base64 <arg>}}`       | Base64-encode a literal or `{{var}}`|
-| `{{sha256 <arg>}}`       | SHA-256 hex digest                  |
-| `{{hmacSha256 key msg}}` | HMAC-SHA256 hex                     |
-| `{{basicAuth user pwd}}` | `Basic <base64(user:pwd)>` value    |
+| Placeholder              | Produces                             |
+| ------------------------ | ------------------------------------ |
+| `{{$guid}}`              | Random UUID v4                       |
+| `{{$timestamp}}`         | Unix seconds                         |
+| `{{$isoTimestamp}}`      | ISO 8601 UTC string                  |
+| `{{$randomInt}}`         | Random integer 0–1000                |
+| `{{base64 <arg>}}`       | Base64-encode a literal or `{{var}}` |
+| `{{sha256 <arg>}}`       | SHA-256 hex digest                   |
+| `{{hmacSha256 key msg}}` | HMAC-SHA256 hex                      |
+| `{{basicAuth user pwd}}` | `Basic <base64(user:pwd)>` value     |
 
 ## Build & Test
 

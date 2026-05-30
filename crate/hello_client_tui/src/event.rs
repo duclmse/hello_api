@@ -6,8 +6,10 @@ pub enum RunnerEvent {
     TestStarted(usize),
     /// Test at `index` finished; result is attached.
     TestFinished(usize, Box<TestResult>),
-    /// All tests finished; total wall-clock time in milliseconds.
+    /// All tests in a full run finished; total wall-clock time in milliseconds.
     Done { elapsed_ms: u128 },
+    /// A single-test run finished (no phase transition to Done).
+    DoneSingle,
     /// A fatal runner error occurred; no further events will be sent.
     Error(String),
 }

@@ -66,6 +66,59 @@ pub fn spawn_runner(
     });
 }
 
+/// Spawn a background thread that runs a single `test_case` and sends events back.
+/// Sends `TestStarted(idx)`, `TestFinished(idx, result)`, then `DoneSingle`.
+pub fn spawn_single_runner(
+    test_case: TestCase,
+    idx: usize,
+    params: HashMap<String, String>,
+    tx: mpsc::SyncSender<RunnerEvent>,
+) {
+    thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+
+        rt.block_on(async move {
+            let local = LocalSet::new();
+            local
+                .run_until(async move {
+                    let allowed = scheme_host(&test_case.request.url)
+                        .map(|p| vec![p])
+                        .unwrap_or_default();
+
+                    let mut builder = HttpTestRunner::builder().allowed_prefixes(allowed);
+                    for (k, v) in &params {
+                        builder = builder.env(k.clone(), v.clone());
+                    }
+
+                    let mut runner = match builder.build() {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = tx.send(RunnerEvent::Error(e.to_string()));
+                            return;
+                        },
+                    };
+
+                    let _ = tx.send(RunnerEvent::TestStarted(idx));
+                    match runner.run_test(test_case).await {
+                        Ok(result) => {
+                            let _ = tx.send(RunnerEvent::TestFinished(idx, Box::new(result)));
+                        },
+                        Err(e) => {
+                            let _ = tx.send(RunnerEvent::Error(e.to_string()));
+                            return;
+                        },
+                    }
+
+                    let _ = tx.send(RunnerEvent::DoneSingle);
+                })
+                .await;
+        });
+    });
+}
+
 /// Extract `"scheme://host[:port]"` from a URL string.
 fn scheme_host(url: &str) -> Option<String> {
     let after = url.find("://").map(|i| i + 3)?;

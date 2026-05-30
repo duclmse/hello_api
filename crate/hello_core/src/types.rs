@@ -40,7 +40,7 @@ impl Default for HttpRequest {
 
 /// One test case: an HTTP request with optional pre/post scripts and per-run
 /// capability overrides.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct TestCase {
     pub name: String,
     pub request: HttpRequest,

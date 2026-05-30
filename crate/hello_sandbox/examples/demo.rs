@@ -35,7 +35,7 @@ async fn demo_trusted() {
             const total = items.reduce((a, b) => a + b, 0);
             console.log("total:", total);
             return { total, avg: total / items.length };
-        "#,
+            "#,
         )
         .await
         .unwrap();
@@ -59,7 +59,7 @@ async fn demo_power_user() {
                 const myVar = sandbox.readInput("run_id");
                 console.log("run_id:", myVar);
                 return myVar * 100;
-            "#,
+                "#,
             )
             .await
             .unwrap();
@@ -85,7 +85,7 @@ async fn demo_typescript() {
             };
             console.log(greeting.message);
             return greeting;
-        "#,
+            "#,
         )
         .await
         .unwrap();
@@ -103,11 +103,11 @@ async fn demo_modules() {
     sb.register_module(
         "sandbox:math",
         r#"
-            export const clamp = (v: number, lo: number, hi: number): number =>
-                Math.min(Math.max(v, lo), hi);
+        export const clamp = (v: number, lo: number, hi: number): number =>
+            Math.min(Math.max(v, lo), hi);
 
-            export const sum = (arr: number[]): number =>
-                arr.reduce((a, b) => a + b, 0);
+        export const sum = (arr: number[]): number =>
+            arr.reduce((a, b) => a + b, 0);
         "#,
     );
 
@@ -121,7 +121,7 @@ async fn demo_modules() {
             const clamped = raw.map(v => clamp(v, 0, 100));
             console.log("clamped:", JSON.stringify(clamped));
             return { clamped, total: sum(clamped) };
-        "#,
+            "#,
         )
         .await
         .unwrap();
@@ -144,7 +144,7 @@ async fn demo_events() {
                 sandbox.emit("progress", { step: i, total: steps, pct: (i / steps * 100) | 0 });
             }
             return { done: true };
-        "#,
+            "#,
         )
         .await
         .unwrap();

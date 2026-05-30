@@ -1129,7 +1129,7 @@ fn print_pretty(collection: &CollectionResult, config: &CliConfig) {
             println!("      → saved response to {}", path);
         }
         if r.visualizer_html.is_some() {
-            println!("      → visualizer HTML written (use --visualize-dir to choose location)");
+            println!("      → visualizer HTML written");
         }
     }
     println!();

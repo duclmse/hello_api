@@ -28,6 +28,33 @@ pub enum Body {
         boundary: String,
         parts: Vec<MultipartPart>,
     },
+    /// Shorthand `[form]` block: multipart/form-data with auto-generated boundary.
+    Form {
+        fields: Vec<FormField>,
+    },
+    /// Shorthand `[form-urlencoded]` block: application/x-www-form-urlencoded.
+    FormUrlEncoded {
+        fields: Vec<(String, String)>,
+    },
+}
+
+/// A single field in a `[form]` or `[form-urlencoded]` block.
+#[derive(Debug, PartialEq, Clone)]
+pub struct FormField {
+    pub name: String,
+    pub value: FormFieldValue,
+    /// Per-field attributes after the value, separated by `; `.
+    /// Special keys: `filename` (→ Content-Disposition param), `Content-Type` / `type` (→ part header).
+    pub attrs: Vec<(String, String)>,
+}
+
+/// Value for a `[form]` field.
+#[derive(Debug, PartialEq, Clone)]
+pub enum FormFieldValue {
+    /// Inline text (may contain `{{var}}` placeholders).
+    Text(String),
+    /// `< path/to/file` — resolved to file content at run time.
+    File(String),
 }
 
 /// One part inside a multipart body.

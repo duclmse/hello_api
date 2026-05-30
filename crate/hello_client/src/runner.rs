@@ -9,7 +9,8 @@ use std::path::Path;
 use crate::http_runner::{CollectionResult, HttpTestRunner};
 use hello_core::client_parser::request_collection;
 use hello_core::http_request::{
-    Body, MultipartPart, PartContent, RequestEntry, Script, Url, UrlSegment,
+    Body, FormField, FormFieldValue, MultipartPart, PartContent, RequestEntry, Script, Url,
+    UrlSegment,
 };
 use hello_core::{HttpRequest as SandboxRequest, TestCase};
 
@@ -234,7 +235,7 @@ pub fn scan_sandbox_imports(source: &str) -> std::collections::HashSet<String> {
 ///
 /// `Body::File` and multipart `PartContent::File` entries are read from disk
 /// relative to `base_dir` at this point, so the sandbox never sees raw paths.
-fn resolve_body(body: Option<Body>, base_dir: &Path) -> Result<Option<String>, String> {
+fn resolve_body(body: Option<Body>, base_dir: &Path, form_boundary: &str) -> Result<Option<String>, String> {
     match body {
         None => Ok(None),
         Some(Body::Raw(s)) => Ok(Some(s)),
@@ -246,6 +247,17 @@ fn resolve_body(body: Option<Body>, base_dir: &Path) -> Result<Option<String>, S
         },
         Some(Body::Multipart { boundary, parts }) => {
             Ok(Some(build_multipart_body(&boundary, &parts, base_dir)?))
+        },
+        Some(Body::Form { fields }) => {
+            Ok(Some(build_form_block_body(form_boundary, &fields, base_dir)?))
+        },
+        Some(Body::FormUrlEncoded { fields }) => {
+            let encoded = fields
+                .iter()
+                .map(|(k, v)| format!("{}={}", percent_encode_form(k), percent_encode_form(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            Ok(Some(encoded))
         },
     }
 }
@@ -284,6 +296,77 @@ fn build_multipart_body(
     Ok(out)
 }
 
+/// Generate a per-request multipart boundary guaranteed unique within this
+/// process (RFC 2046: boundary must not appear in any part body).
+fn random_boundary() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    format!("----FormBoundary{:016x}{:016x}", nanos, seq)
+}
+
+/// Serialize a `[form]` field list to a multipart body, reusing the existing
+/// [`build_multipart_body`] serializer.
+///
+/// Field attributes are mapped as follows:
+/// - `filename` → appended to Content-Disposition as `filename="..."`.
+/// - `Content-Type` / `type` → emitted as a separate part header.
+/// - Any other attribute → appended to Content-Disposition verbatim.
+fn build_form_block_body(
+    boundary: &str,
+    fields: &[FormField],
+    base_dir: &Path,
+) -> Result<String, String> {
+    let parts: Vec<MultipartPart> = fields
+        .iter()
+        .map(|f| {
+            let mut cd = format!("form-data; name=\"{}\"", f.name);
+            let mut extra: Vec<(String, String)> = Vec::new();
+            for (k, v) in &f.attrs {
+                if k.eq_ignore_ascii_case("filename") {
+                    cd.push_str(&format!("; filename=\"{}\"", v));
+                } else if k.eq_ignore_ascii_case("content-type") || k.eq_ignore_ascii_case("type")
+                {
+                    extra.push(("Content-Type".to_string(), v.clone()));
+                } else {
+                    cd.push_str(&format!("; {}=\"{}\"", k, v));
+                }
+            }
+            let mut headers = vec![("Content-Disposition".to_string(), cd)];
+            headers.extend(extra);
+            MultipartPart {
+                headers,
+                content: match &f.value {
+                    FormFieldValue::Text(t) => PartContent::Text(t.clone()),
+                    FormFieldValue::File(p) => PartContent::File(p.clone()),
+                },
+            }
+        })
+        .collect();
+    build_multipart_body(boundary, &parts, base_dir)
+}
+
+/// Percent-encode a string for use in `application/x-www-form-urlencoded`.
+/// Spaces become `+`; everything outside unreserved characters is `%XX`-encoded.
+fn percent_encode_form(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b' ' => out.push('+'),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'*' => {
+                out.push(b as char)
+            },
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 // ─── Content-Type detection ───────────────────────────────────────────────────
 
 /// Infer a `Content-Type` value from the body when the user hasn't set one.
@@ -295,6 +378,10 @@ fn detect_content_type(body: &Option<Body>) -> Option<String> {
         None => None,
         Some(Body::Multipart { boundary, .. }) => {
             Some(format!("multipart/form-data; boundary={}", boundary))
+        },
+        Some(Body::Form { .. }) => None, // handled before this fn is called
+        Some(Body::FormUrlEncoded { .. }) => {
+            Some("application/x-www-form-urlencoded".to_string())
         },
         Some(Body::Raw(s)) => detect_from_text(s.trim_start()),
         Some(Body::File(path)) => {
@@ -345,13 +432,29 @@ pub fn entry_to_test_case(
     let mut headers: Vec<(String, String)> =
         entry.request.headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
 
-    // Auto-inject Content-Type when the user hasn't set one.
-    let has_content_type = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
-    if !has_content_type && let Some(ct) = detect_content_type(&entry.request.body) {
-        headers.push(("Content-Type".to_string(), ct));
+    // For Body::Form always set/replace Content-Type (user may have written
+    // `Content-Type: multipart/form-data` without the required boundary).
+    // The boundary is generated once so the header and body stay in sync.
+    // For all other bodies, auto-inject only when Content-Type is absent.
+    let boundary = random_boundary();
+    if matches!(&entry.request.body, Some(Body::Form { .. })) {
+        let ct = format!("multipart/form-data; boundary={}", boundary);
+        if let Some(idx) =
+            headers.iter().position(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        {
+            headers[idx].1 = ct;
+        } else {
+            headers.push(("Content-Type".to_string(), ct));
+        }
+    } else {
+        let has_content_type =
+            headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
+        if !has_content_type && let Some(ct) = detect_content_type(&entry.request.body) {
+            headers.push(("Content-Type".to_string(), ct));
+        }
     }
 
-    let body = resolve_body(entry.request.body, base_dir)?;
+    let body = resolve_body(entry.request.body, base_dir, &boundary)?;
 
     let request = SandboxRequest {
         url,
@@ -1046,5 +1149,121 @@ return add(1, 2);"#,
             !tc.request.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")),
             "should not inject Content-Type for plain text"
         );
+    }
+
+    // ── [form] shorthand ──────────────────────────────────────────────────────
+
+    #[test]
+    fn form_block_boundary_is_unique_per_request() {
+        // Each entry_to_test_case call must produce a distinct boundary so that
+        // file content matching the boundary string can never corrupt the body.
+        let input = "POST https://example.com/ HTTP/1.1\n\n[form]\ntitle = hello\n";
+        let extract_boundary = |tc: &hello_core::TestCase| {
+            tc.request
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                .map(|(_, v)| v.clone())
+                .unwrap()
+        };
+        let e1 = parse_single(input);
+        let e2 = parse_single(input);
+        let b1 = extract_boundary(&entry_to_test_case(e1, &no_params(), Path::new(".")).unwrap());
+        let b2 = extract_boundary(&entry_to_test_case(e2, &no_params(), Path::new(".")).unwrap());
+        assert!(b1.starts_with("multipart/form-data; boundary="), "b1={}", b1);
+        assert_ne!(b1, b2, "boundaries must differ across requests");
+    }
+
+    #[test]
+    fn entry_form_block_auto_injects_content_type() {
+        let input = "POST https://example.com/ HTTP/1.1\n\n[form]\ntitle = Upload\n";
+        let entry = parse_single(input);
+        let tc = entry_to_test_case(entry, &no_params(), Path::new(".")).unwrap();
+        assert!(
+            tc.request
+                .headers
+                .iter()
+                .any(|(k, v)| k == "Content-Type" && v.starts_with("multipart/form-data")),
+            "headers={:?}",
+            tc.request.headers
+        );
+    }
+
+    #[test]
+    fn entry_form_block_body_contains_boundary_parts() {
+        let input = "POST https://example.com/ HTTP/1.1\n\n[form]\ntitle = Hello\nname = World\n";
+        let entry = parse_single(input);
+        let tc = entry_to_test_case(entry, &no_params(), Path::new(".")).unwrap();
+        let body = tc.request.body.as_deref().unwrap_or("");
+        assert!(body.contains("Content-Disposition: form-data"), "body={}", body);
+        assert!(body.contains("name=\"title\""), "body={}", body);
+        assert!(body.contains("Hello"), "body={}", body);
+        assert!(body.contains("name=\"name\""), "body={}", body);
+        assert!(body.contains("World"), "body={}", body);
+    }
+
+    #[test]
+    fn entry_form_block_always_sets_multipart_content_type() {
+        // Even when the user writes `Content-Type: multipart/form-data` (no boundary),
+        // or any other Content-Type, [form] always replaces it with the full boundary.
+        let input =
+            "POST https://example.com/ HTTP/1.1\nContent-Type: multipart/form-data\n\n[form]\nx = 1\n";
+        let entry = parse_single(input);
+        let tc = entry_to_test_case(entry, &no_params(), Path::new(".")).unwrap();
+        let cts: Vec<_> = tc
+            .request
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            .collect();
+        assert_eq!(cts.len(), 1, "exactly one Content-Type");
+        assert!(
+            cts[0].1.starts_with("multipart/form-data; boundary="),
+            "ct={}", cts[0].1
+        );
+    }
+
+    // ── [form-urlencoded] shorthand ───────────────────────────────────────────
+
+    #[test]
+    fn detect_form_urlencoded_block_injects_content_type() {
+        use hello_core::http_request::Body;
+        let body = Some(Body::FormUrlEncoded {
+            fields: vec![("user".to_string(), "alice".to_string())],
+        });
+        assert_eq!(
+            super::detect_content_type(&body).as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+    }
+
+    #[test]
+    fn entry_form_urlencoded_block_auto_injects_content_type() {
+        let input = "POST https://example.com/login HTTP/1.1\n\n[form-urlencoded]\nuser = alice\n";
+        let entry = parse_single(input);
+        let tc = entry_to_test_case(entry, &no_params(), Path::new(".")).unwrap();
+        assert!(
+            tc.request.headers.iter().any(|(k, v)| k == "Content-Type"
+                && v == "application/x-www-form-urlencoded"),
+            "headers={:?}",
+            tc.request.headers
+        );
+    }
+
+    #[test]
+    fn entry_form_urlencoded_body_is_encoded_string() {
+        let input = "POST https://example.com/login HTTP/1.1\n\n[form-urlencoded]\nusername = alice\npassword = p4ss\n";
+        let entry = parse_single(input);
+        let tc = entry_to_test_case(entry, &no_params(), Path::new(".")).unwrap();
+        assert_eq!(tc.request.body.as_deref(), Some("username=alice&password=p4ss"));
+    }
+
+    #[test]
+    fn form_urlencoded_percent_encodes_special_chars() {
+        let input = "POST https://example.com/ HTTP/1.1\n\n[form-urlencoded]\nq = hello world\n";
+        let entry = parse_single(input);
+        let tc = entry_to_test_case(entry, &no_params(), Path::new(".")).unwrap();
+        let body = tc.request.body.as_deref().unwrap_or("");
+        assert!(body.contains("hello+world"), "body={}", body);
     }
 }
