@@ -3,11 +3,34 @@ name = "hello_server"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "hello_server"
+path = "src/main.rs"
+
+[lib]
+name = "hello_server"
+path = "src/lib.rs"
+
 [dependencies]
-axum = { workspace = true }
-tower = { workspace = true }
-tower-http = { workspace = true }
-http = { workspace = true }
-matchit = { workspace = true }
-arc-swap = { workspace = true }
-notify = { workspace = true }
+hello_core  = { path = "../hello_core" }
+axum        = { workspace = true }
+tower       = { workspace = true }
+tower-http  = { workspace = true }
+http        = { workspace = true }
+matchit     = { workspace = true }
+arc-swap    = { workspace = true }
+notify      = { workspace = true }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+serde_yaml  = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+clap        = { workspace = true }
+rand        = { workspace = true }
+log         = { workspace = true }
+env_logger  = "0.11"
+
+[dev-dependencies]
+tempfile = "3"
+reqwest  = { workspace = true }

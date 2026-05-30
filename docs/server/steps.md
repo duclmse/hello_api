@@ -6,6 +6,44 @@ compiles cleanly (`cargo build -p hello_server`) and its associated tests pass.
 
 ---
 
+## Status (2026-05-31)
+
+All phases 0–12 are complete.  The crate compiles cleanly with zero warnings
+and all 28 unit tests pass.  Key implementation notes:
+
+- **Module layout** follows the spec: `model`, `detect`, `ingest/*`, `registry`,
+  `render`, `server`, `watcher`, `loader`, `lib`, `main`.
+- **`SelectionStrategy::MatchStatus`** reads the `X-Mock-Status: <code>` request
+  header at runtime, rather than storing the code in the enum variant.  Fallback
+  is the first 2xx response, then responses[0].
+- **`Pattern::Regex`** stores the pattern as a `String` and currently uses
+  `str::contains` as a fallback.  Add the `regex` crate and replace with
+  `Regex::new(pat)?.is_match(value)` when regex guard support is needed.
+- **`.http` multi-entry separator**: when using a bare `###` to separate entries
+  in a mock `.http` file, the separator must be immediately followed by the next
+  entry's metadata on the very next line with no blank line in between.  A blank
+  line after `###` is consumed as empty metadata; then the parser cannot start a
+  new entry from the `### @response …` that follows.  The safe form is:
+
+  ```http
+  ### @response 200
+
+  GET /users
+
+  ###
+  ### @response 201
+
+  POST /users
+  ```
+
+- **Bruno inline blocks** (`meta { name: X }` on one line) are handled correctly
+  in addition to the standard multi-line form.
+- **`hello_core` metadata extension**: `parse_param` was extended to accept the
+  short `@key value` form in addition to the legacy `@param key value` form.
+  This is needed so `.http` mock files can use `### @response 200` directly.
+
+---
+
 ## Phase 0 — Scaffold
 
 **Goal**: empty crate compiles; all dependencies are declared.

@@ -15,7 +15,10 @@ use std::collections::HashMap;
 #[test]
 fn postman_import_minimal_get() {
     let json = r#"{
-        "info": { "name": "My API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+        "info": {
+            "name": "My API",
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+        },
         "item": [{
             "name": "Get Users",
             "request": {

@@ -650,12 +650,18 @@ fn render_request_editor(f: &mut Frame, app: &App) {
                         let label = Span::styled(pad_clip(&format!("{{{}}}", fi), LABEL_W), dim);
 
                         let key_spans: Vec<Span> = if selected && re.editing && re.edit_key {
-                            vec![Span::styled(format!("{}▌", re.input), base.fg(Color::Yellow))]
+                            vec![Span::styled(
+                                format!("{}▌", re.input),
+                                base.fg(Color::Yellow),
+                            )]
                         } else {
                             template_spans(k, params, dim, bg)
                         };
                         let val_spans: Vec<Span> = if selected && re.editing && !re.edit_key {
-                            vec![Span::styled(format!("{}▌", re.input), base.fg(Color::Yellow))]
+                            vec![Span::styled(
+                                format!("{}▌", re.input),
+                                base.fg(Color::Yellow),
+                            )]
                         } else {
                             template_spans(v, params, base, bg)
                         };
@@ -689,8 +695,11 @@ fn render_request_editor(f: &mut Frame, app: &App) {
                         }
 
                         if selected && !re.editing {
-                            let col_hint =
-                                if re.edit_key { "[Tab] edit value" } else { "[Tab] edit key" };
+                            let col_hint = if re.edit_key {
+                                "[Tab] edit value"
+                            } else {
+                                "[Tab] edit key"
+                            };
                             lines.push(Line::from(vec![
                                 Span::raw(" ".repeat(LABEL_W + SEP.len())),
                                 Span::styled(
@@ -891,30 +900,29 @@ fn render_browser(f: &mut Frame, app: &App) {
             match entry {
                 BrowserEntry::ParentDir => ListItem::new(Line::from(Span::styled(
                     " ↑  ..",
-                    if selected { sel_style } else { Style::new().fg(Color::DarkGray) },
+                    if selected {
+                        sel_style
+                    } else {
+                        Style::new().fg(Color::DarkGray)
+                    },
                 ))),
                 BrowserEntry::Dir(name, _) => {
-                    let style =
-                        if selected { sel_style } else { Style::new().fg(Color::Cyan) };
+                    let style = if selected {
+                        sel_style
+                    } else {
+                        Style::new().fg(Color::Cyan)
+                    };
                     ListItem::new(Line::from(vec![
                         Span::styled(" ▶ ", style),
                         Span::styled(name.as_str(), style.bold()),
                         Span::styled("/", Style::new().fg(Color::DarkGray)),
                     ]))
                 },
-                BrowserEntry::CollectionFile(name, _, label) => {
-                    ListItem::new(Line::from(vec![
-                        Span::raw("   "),
-                        Span::styled(
-                            name.as_str(),
-                            if selected { sel_style } else { Style::new() },
-                        ),
-                        Span::styled(
-                            format!(" .{}", label),
-                            Style::new().fg(Color::DarkGray),
-                        ),
-                    ]))
-                },
+                BrowserEntry::CollectionFile(name, _, label) => ListItem::new(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(name.as_str(), if selected { sel_style } else { Style::new() }),
+                    Span::styled(format!(" .{}", label), Style::new().fg(Color::DarkGray)),
+                ])),
             }
         })
         .collect();
@@ -924,9 +932,8 @@ fn render_browser(f: &mut Frame, app: &App) {
     f.render_stateful_widget(list, list_rect, &mut state);
 
     // ── Preview pane ───────────────────────────────────────────────────────────
-    let preview_block = Block::default()
-        .borders(Borders::LEFT)
-        .style(Style::new().bg(Color::Black));
+    let preview_block =
+        Block::default().borders(Borders::LEFT).style(Style::new().bg(Color::Black));
     let preview_inner = preview_block.inner(preview_rect);
     f.render_widget(preview_block, preview_rect);
 
@@ -948,30 +955,26 @@ fn render_browser(f: &mut Frame, app: &App) {
     } else {
         // Render with syntax highlighting.
         let selected_label = match browser.selected() {
-            Some(BrowserEntry::CollectionFile(name, _, label)) => {
-                Some((*label, name.as_str()))
-            },
+            Some(BrowserEntry::CollectionFile(name, _, label)) => Some((*label, name.as_str())),
             _ => None,
         };
         let is_http = matches!(selected_label, Some(("http", _)) | Some(("bru", _)));
 
-        let lines: Vec<Line> = app
+        let lines: Vec<Line> = app //
             .browser_preview_lines
             .iter()
             .map(|raw| http_preview_line(raw, is_http))
             .collect();
 
         f.render_widget(
-            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            Paragraph::new(lines) //
+                .wrap(Wrap { trim: false }),
             preview_inner,
         );
     }
 
     let footer = "  [jk] nav  [Enter] enter dir/open  [Space] open dir  [h/←/BS] back  [Esc] close";
-    f.render_widget(
-        Paragraph::new(footer).style(Style::new().fg(Color::DarkGray)),
-        footer_rect,
-    );
+    f.render_widget(Paragraph::new(footer).style(Style::new().fg(Color::DarkGray)), footer_rect);
 }
 
 /// Apply basic syntax colouring to one line of an .http/.bru file preview.
@@ -995,12 +998,11 @@ fn http_preview_line(line: &str, is_http: bool) -> Line<'static> {
     }
 
     // HTTP method line: "METHOD URL"
-    const METHODS: &[&str] =
-        &["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"];
+    const METHODS: &[&str] = &[
+        "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE",
+    ];
     for method in METHODS {
-        if line.starts_with(method)
-            && line[method.len()..].starts_with(' ')
-        {
+        if line.starts_with(method) && line[method.len()..].starts_with(' ') {
             let url = &line[method.len() + 1..];
             return Line::from(vec![
                 Span::styled(method.to_string(), Style::new().fg(Color::Green).bold()),

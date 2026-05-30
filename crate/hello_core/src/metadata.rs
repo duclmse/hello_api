@@ -32,15 +32,36 @@ fn parse_description(input: &'_ str) -> IResult<&'_ str, MetadataSegment<'_>> {
     .parse(input)
 }
 
-// Parse a line that starts with "### @param " followed by name and value
+// Parse a metadata param.  Two accepted forms:
+//   @param name value   — legacy explicit form
+//   @name value         — short form: any @-prefixed identifier key
+//
+// Both are stored as `Param { name, value }` in the map.  The legacy form is
+// tried first so that `@param foo bar` always yields name="foo", not name="param".
 fn parse_param(input: &'_ str) -> IResult<&'_ str, MetadataSegment<'_>> {
-    map(
-        (tag("@param"), space1, take_while1(|c: char| !c.is_whitespace()), space1, not_line_ending),
-        |(_, _, name, _, value): (&str, &str, &str, &str, &str)| MetadataSegment::Param {
-            name,
-            value: value.trim(),
-        },
-    )
+    nom::branch::alt((
+        // @param name value
+        map(
+            (tag("@param"), space1, take_while1(|c: char| !c.is_whitespace()), space1, not_line_ending),
+            |(_, _, name, _, value): (&str, &str, &str, &str, &str)| MetadataSegment::Param {
+                name,
+                value: value.trim(),
+            },
+        ),
+        // @name value  (any identifier-like key)
+        map(
+            (
+                tag("@"),
+                take_while1(|c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+                space1,
+                not_line_ending,
+            ),
+            |(_, name, _, value): (&str, &str, &str, &str)| MetadataSegment::Param {
+                name,
+                value: value.trim(),
+            },
+        ),
+    ))
     .parse(input)
 }
 
